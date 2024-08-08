@@ -39,9 +39,8 @@ urlpatterns = [
     path('pdfapi/', include('pdftoimages.urls')),
     path('img2yololabels/', include('img2yololabels.urls')),
     path('excelsheetapi/', include('excelsheetapi.urls')),
-    # path('', schema_view.with_ui('swagger', cache_timeout=0), name='Swagger UI'),
+    path('', schema_view.with_ui('swagger', cache_timeout=0), name='Swagger UI'),
     # re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     # path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     # path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
-
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

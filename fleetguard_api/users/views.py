@@ -25,7 +25,7 @@ class LoginView(APIView):
 
         payload = {
             'id' : user.id,
-            'exp':datetime.datetime.utcnow() + datetime.timedelta(hours=24),#token will be live for 1 hour
+            'exp':datetime.datetime.utcnow() + datetime.timedelta(hours=24),#token will live for 1 hour
             'iat':datetime.datetime.utcnow()
 
         }

@@ -3,7 +3,6 @@ from django.shortcuts import render
 import os
 import cv2
 import re
-import numpy as np
 import pandas as pd
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
@@ -15,7 +14,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Border, Side, Alignment, PatternFill, Font
 from paddleocr import PaddleOCR
 import pytesseract
+from urllib.parse import unquote,urlparse
+from urllib.parse import quote
 import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import paddle
@@ -71,7 +75,18 @@ def FINALcompare_dimensions(ffpl_text, cust_dict):
     return matched_pairs
 
 
+def extract_path_from_url(url):
+    parsed_url = urlparse(url)
+    path = unquote(parsed_url.path)
+    path = path.replace('\\', '/').lstrip('/')  # Replace backslashes and remove leading slashes
+    return os.path.normpath(path)
 
+# Ensure paths are relative to MEDIA_ROOT
+def construct_full_path(url_path):
+    if not url_path.startswith(settings.MEDIA_URL):
+        return None
+    media_root_relative_path = url_path[len(settings.MEDIA_URL):]
+    return os.path.join(settings.MEDIA_ROOT, media_root_relative_path)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class GenerateExcelView(View):
@@ -136,14 +151,19 @@ class GenerateExcelView(View):
         df = pd.DataFrame(data)
 
         try:
+            # Define directory and filename
+            excelsheet_dir = os.path.join(settings.MEDIA_ROOT, 'Excelsheet')
+            # Create the directory if it doesn't exist
+            os.makedirs(excelsheet_dir, exist_ok=True)
             filename = f'detected_text_{img_num}.xlsx'
+            file_path = os.path.join(excelsheet_dir, filename)
 
             # Write the DataFrame to an Excel file
-            df.to_excel(filename, index=False)
-            print(f"Excel file saved: {filename}")
+            df.to_excel(file_path, index=False)
+            print(f"Excel file saved: {file_path}")
 
             # Open the Excel file and apply borders and formatting
-            wb = load_workbook(filename)
+            wb = load_workbook(file_path)
             sheet = wb.active
 
             # Set the desired column widths (adjust as necessary)
@@ -212,43 +232,63 @@ class GenerateExcelView(View):
                 for cell in sheet[column]:
                     cell.alignment = Alignment(wrap_text=True, vertical='top')
 
-            wb.save(filename)
+            wb.save(file_path)
 
         except Exception as e:
             print(f"Error occurred while saving Excel file: {e}")
-        filename = f'detected_text_{img_num}.xlsx'
+        # filename = f'detected_text_{img_num}.xlsx'
         # Save the DataFrame to an Excel file, apply formatting, etc.
         # Return the filename for response
         return filename
 
+
     @csrf_exempt
     def post(self, request):
         # Get the uploaded images
-        ffpl_image = request.FILES.get('ffpl_image')
-        cust_image = request.FILES.get('cust_image')
-        ffpl_yolo_output = request.FILES.get('ffpl_yolo_output')
-        cust_yolo_output = request.FILES.get('cust_yolo_output')
+        ffpl_image = request.POST.get('ffpl_image')
+        cust_image = request.POST.get('cust_image')
+        ffpl_yolo_output = request.POST.get('ffpl_yolo_output')
+        cust_yolo_output = request.POST.get('cust_yolo_output')
+        if not ffpl_image or not cust_image or not ffpl_yolo_output or not cust_yolo_output:
+            return JsonResponse({'error': 'All image and YOLO output paths are required'}, status=400)
 
-        if not ffpl_image or not cust_image:
-            return JsonResponse({'error': 'Both images are required'}, status=400)
+        decoded_ffpl_path=unquote(ffpl_image)
+        decoded_cust_path=unquote(cust_image)
+        decoded_ffpl_yolo=unquote(ffpl_yolo_output)
+        decoded_cust_yolo=unquote(cust_yolo_output)
 
-        # Save the uploaded files
-        fs = FileSystemStorage()
-        ffpl_path = fs.save(ffpl_image.name, ffpl_image)
-        cust_path = fs.save(cust_image.name, cust_image)
-        ffpl_yolo_output_path = fs.save(ffpl_yolo_output.name, ffpl_yolo_output)
-        cust_yolo_output_path = fs.save(cust_yolo_output.name, cust_yolo_output)
+        # Ensure the path starts with the MEDIA_ROOT to prevent directory traversal attacks
+        if not decoded_ffpl_path.startswith(settings.MEDIA_URL):
+            return JsonResponse({'error': 'Invalid FFPL image URL'}, status=400)
+        media_root_relative_path = decoded_ffpl_path[len(settings.MEDIA_URL):]
+        full_ffpl_path = os.path.join(settings.MEDIA_ROOT, media_root_relative_path)
 
-        ffpl_image_path = os.path.join(fs.location, ffpl_path)
-        cust_image_path = os.path.join(fs.location, cust_path)
-        ffpl_yolo_output_path = os.path.join(fs.location, ffpl_yolo_output_path)
-        cust_yolo_output_path = os.path.join(fs.location,cust_yolo_output_path)
+        if not decoded_cust_path.startswith(settings.MEDIA_URL):
+            return JsonResponse({'error': 'Invalid CUST image URL'}, status=400)
+        media_root_relative_path = decoded_cust_path[len(settings.MEDIA_URL):]
+        full_cust_path = os.path.join(settings.MEDIA_ROOT, media_root_relative_path)
+
+        if not decoded_ffpl_yolo.startswith(settings.MEDIA_URL):
+            return JsonResponse({'error': 'Invalid FFPL YOLO URL'}, status=400)
+        media_root_relative_path = decoded_ffpl_yolo[len(settings.MEDIA_URL):]
+        ffpl_yolo_output_path = os.path.join(settings.MEDIA_ROOT, media_root_relative_path)
+
+        if not decoded_cust_yolo.startswith(settings.MEDIA_URL):
+            return JsonResponse({'error': 'Invalid CUST YOLO URL'}, status=400)
+        media_root_relative_path = decoded_cust_yolo[len(settings.MEDIA_URL):]
+        cust_yolo_output_path = os.path.join(settings.MEDIA_ROOT, media_root_relative_path)
+
+        # Ensure the 'excelsheet' directory exists
+        excelsheet_dir = os.path.join(settings.MEDIA_ROOT, 'excelsheet')
+        os.makedirs(excelsheet_dir, exist_ok=True)
+
         # Perform OCR on both images
-        ffpl_text, ffpl_notes = self.extract_text(ffpl_image_path, ffpl_yolo_output_path)
-        cust_text, cust_notes = self.extract_text(cust_image_path, cust_yolo_output_path)
+        ffpl_text, ffpl_notes = self.extract_text(full_ffpl_path, ffpl_yolo_output_path)
+        cust_text, cust_notes = self.extract_text(full_cust_path, cust_yolo_output_path)
 
         # Generate Excel
-        img_num = len(os.listdir(settings.MEDIA_ROOT))  # Use current count of images to create unique filename
+        img_num = len(os.listdir(settings.MEDIA_ROOT)) # Use current count of files to create unique filename
         excel_filename = self.FINALsave_to_excel(ffpl_text, ffpl_notes, cust_text, cust_notes, img_num)
+        excel_file_path = os.path.join('excelsheet', excel_filename)  # Path relative to MEDIA_URL
 
-        return JsonResponse({'excel_file': excel_filename})
+        return JsonResponse({'excel_file': excel_file_path})
